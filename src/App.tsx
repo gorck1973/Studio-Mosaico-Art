@@ -1,5 +1,15 @@
-import { useMemo, useRef, useState } from 'react';
-import { BookOpen, Check, Copy, Download, FileSpreadsheet, Layers } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  BookOpen,
+  Check,
+  Copy,
+  Download,
+  FileSpreadsheet,
+  FileText,
+  FolderOpen,
+  Layers,
+  Save,
+} from 'lucide-react';
 import { CodeMatrixView } from './components/CodeMatrixView';
 import { ColorLayersBlackView } from './components/ColorLayersBlackView';
 import { ControlsSidebar } from './components/ControlsSidebar';
@@ -15,6 +25,15 @@ import {
 } from './types/pixelGrid';
 import { hexToRgb, makePaletteColor } from './utils/colorMath';
 import { buildTextGuide, exportMosaicCsv, exportMosaicPng } from './utils/exporters';
+import { exportMosaicPdf } from './utils/pdfExporter';
+import {
+  downloadProjectFile,
+  imageElementToDataUrl,
+  loadAutosaveFromStorage,
+  MosaicProjectFile,
+  parseProjectFile,
+  saveAutosaveToStorage,
+} from './utils/projectStorage';
 import {
   buildDefaultStudioCanvas,
   computeColorUsageStats,
@@ -59,10 +78,62 @@ export default function App() {
   const [manualOverrides, setManualOverrides] = useState<Record<string, string>>({});
   const [customPalette, setCustomPalette] = useState<PaletteColor[] | null>(null);
   const [copiedGuide, setCopiedGuide] = useState(false);
+  const [savedProjectFeedback, setSavedProjectFeedback] = useState(false);
   const [pieceSizeCm, setPieceSizeCm] = useState<number>(5);
   const [isWorkshopGuideOpen, setIsWorkshopGuideOpen] = useState(false);
 
   const lastAutoPaletteRef = useRef<PaletteColor[] | undefined>(undefined);
+  const projectFileInputRef = useRef<HTMLInputElement>(null);
+  const isHydratedRef = useRef(false);
+
+  // Restore last auto-saved session on mount
+  useEffect(() => {
+    const saved = loadAutosaveFromStorage();
+    if (saved) {
+      setSettings((prev) => ({ ...prev, ...saved.settings }));
+      setPieceSizeCm(saved.pieceSizeCm);
+      setCoordFormat(saved.coordFormat);
+      setCustomPalette(saved.customPalette);
+      setManualOverrides(saved.manualOverrides);
+      setUploadedFileName(saved.fileName);
+
+      if (saved.sourceImageDataUrl) {
+        const img = new Image();
+        img.onload = () => setUploadedImage(img);
+        img.src = saved.sourceImageDataUrl;
+      }
+    }
+    isHydratedRef.current = true;
+  }, []);
+
+  // Debounced auto-save to localStorage so brush edits & settings survive accidental reload
+  useEffect(() => {
+    if (!isHydratedRef.current) return;
+    const timer = window.setTimeout(() => {
+      const project: MosaicProjectFile = {
+        version: 1,
+        app: 'Studio Mosaico Art',
+        savedAt: new Date().toISOString(),
+        fileName: uploadedFileName,
+        sourceImageDataUrl: uploadedImage ? imageElementToDataUrl(uploadedImage) : null,
+        settings,
+        pieceSizeCm,
+        coordFormat,
+        customPalette,
+        manualOverrides,
+      };
+      saveAutosaveToStorage(project);
+    }, 450);
+    return () => window.clearTimeout(timer);
+  }, [
+    settings,
+    pieceSizeCm,
+    coordFormat,
+    customPalette,
+    manualOverrides,
+    uploadedImage,
+    uploadedFileName,
+  ]);
 
   const sourceElement = useMemo(() => {
     if (uploadedImage) return uploadedImage;
@@ -231,6 +302,59 @@ export default function App() {
     } catch {
       // Clipboard fallback silent
     }
+  };
+
+  const handleSaveProjectFile = () => {
+    const project: MosaicProjectFile = {
+      version: 1,
+      app: 'Studio Mosaico Art',
+      savedAt: new Date().toISOString(),
+      fileName: uploadedFileName,
+      sourceImageDataUrl: uploadedImage ? imageElementToDataUrl(uploadedImage) : null,
+      settings,
+      pieceSizeCm,
+      coordFormat,
+      customPalette,
+      manualOverrides,
+    };
+    downloadProjectFile(project);
+    setSavedProjectFeedback(true);
+    setTimeout(() => setSavedProjectFeedback(false), 1800);
+  };
+
+  const handleOpenProjectFile = (file: File) => {
+    setUploadError(null);
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const project = parseProjectFile(String(reader.result ?? ''));
+        setSettings((prev) => ({ ...prev, ...project.settings }));
+        setPieceSizeCm(project.pieceSizeCm);
+        setCoordFormat(project.coordFormat);
+        setCustomPalette(project.customPalette);
+        setManualOverrides(project.manualOverrides);
+        setUploadedFileName(project.fileName);
+        setHighlightedColorId(null);
+        setActiveBrushColorId(null);
+
+        if (project.sourceImageDataUrl) {
+          const img = new Image();
+          img.onload = () => setUploadedImage(img);
+          img.onerror = () =>
+            setUploadError('Se cargaron los ajustes, pero no se pudo decodificar la imagen del proyecto.');
+          img.src = project.sourceImageDataUrl;
+        } else {
+          setUploadedImage(null);
+        }
+      } catch (err) {
+        setUploadError(
+          err instanceof Error
+            ? err.message
+            : 'No se pudo abrir el archivo de proyecto.'
+        );
+      }
+    };
+    reader.readAsText(file);
   };
 
   const usedColorsCount = finalMosaic.stats.filter((s) => s.count > 0).length;
@@ -464,6 +588,26 @@ export default function App() {
             <button
               type="button"
               onClick={() =>
+                exportMosaicPdf(
+                  finalMosaic.cells,
+                  finalMosaic.palette,
+                  finalMosaic.stats,
+                  coordFormat,
+                  finalMosaic.cols,
+                  finalMosaic.rows,
+                  pieceSizeCm
+                )
+              }
+              title="Descargar hoja imprimible en PDF (cuadrícula, conteos y coordenadas)"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 transition-colors whitespace-nowrap"
+            >
+              <FileText className="w-3.5 h-3.5 shrink-0" />
+              PDF
+            </button>
+
+            <button
+              type="button"
+              onClick={() =>
                 exportMosaicCsv(
                   finalMosaic.cells,
                   finalMosaic.stats,
@@ -490,6 +634,43 @@ export default function App() {
                 <Copy className="w-3.5 h-3.5 shrink-0" />
               )}
               {copiedGuide ? 'Guía copiada' : 'Copiar Guía'}
+            </button>
+
+            <span aria-hidden="true" className="hidden sm:inline-block h-4 w-px bg-slate-200" />
+
+            <button
+              type="button"
+              onClick={handleSaveProjectFile}
+              title="Guardar proyecto (.mosaico.json) con ajustes, paleta y retoques manuales"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 transition-colors whitespace-nowrap"
+            >
+              {savedProjectFeedback ? (
+                <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+              ) : (
+                <Save className="w-3.5 h-3.5 shrink-0" />
+              )}
+              {savedProjectFeedback ? 'Guardado' : 'Guardar'}
+            </button>
+
+            <input
+              ref={projectFileInputRef}
+              type="file"
+              accept=".json,.mosaico.json,application/json"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) handleOpenProjectFile(file);
+                e.target.value = '';
+              }}
+              className="hidden"
+            />
+            <button
+              type="button"
+              onClick={() => projectFileInputRef.current?.click()}
+              title="Reabrir un archivo de proyecto .mosaico.json guardado anteriormente"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 transition-colors whitespace-nowrap"
+            >
+              <FolderOpen className="w-3.5 h-3.5 shrink-0" />
+              Abrir
             </button>
           </div>
         </div>
