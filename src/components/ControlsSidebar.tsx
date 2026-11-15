@@ -7,8 +7,12 @@ import {
   PURE_COLOR_SWATCHES,
 } from '../types/pixelGrid';
 
+import { formatCm } from '../utils/exporters';
+
 interface ControlsSidebarProps {
   settings: AdjustmentSettings;
+  pieceSizeCm: number;
+  onPieceSizeChange: (cm: number) => void;
   onUpdateSettings: (patch: Partial<AdjustmentSettings>) => void;
   onResetAdjustments: () => void;
   onUploadFile: (file: File) => void;
@@ -93,6 +97,8 @@ const ColorSlotPicker: React.FC<ColorSlotPickerProps> = ({ label, value, onChang
 
 export const ControlsSidebar: React.FC<ControlsSidebarProps> = ({
   settings,
+  pieceSizeCm,
+  onPieceSizeChange,
   onUpdateSettings,
   onResetAdjustments,
   onUploadFile,
@@ -100,6 +106,16 @@ export const ControlsSidebar: React.FC<ControlsSidebarProps> = ({
   onRecomputePalette,
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handlePieceSizeInput = (raw: string) => {
+    if (raw === '') {
+      onPieceSizeChange(0);
+      return;
+    }
+    const parsed = parseFloat(raw);
+    if (Number.isNaN(parsed)) return;
+    onPieceSizeChange(Math.max(0, Math.min(100, parsed)));
+  };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -234,6 +250,65 @@ export const ControlsSidebar: React.FC<ControlsSidebarProps> = ({
               aria-label="Filas de cuadrícula"
             />
           </label>
+        </div>
+
+        {/* Compact Physical Piece Size Calculator */}
+        <div className="pt-1.5 border-t border-slate-100 space-y-1.5">
+          <div className="flex items-center justify-between gap-1.5">
+            <label
+              htmlFor="c-piece-size"
+              className="text-[11px] font-medium text-slate-700"
+            >
+              Pieza física (cm)
+            </label>
+            <div className="flex items-center gap-1">
+              {[2, 5, 10].map((cm) => (
+                <button
+                  key={cm}
+                  type="button"
+                  onClick={() => onPieceSizeChange(cm)}
+                  className={`px-1.5 py-0.5 text-[10px] font-mono rounded border transition-colors ${
+                    pieceSizeCm === cm
+                      ? 'bg-slate-900 text-white border-slate-900'
+                      : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                  }`}
+                >
+                  {cm}
+                </button>
+              ))}
+              <input
+                id="c-piece-size"
+                type="number"
+                min={0}
+                max={100}
+                step={0.5}
+                value={pieceSizeCm === 0 ? '' : pieceSizeCm}
+                placeholder="0"
+                onChange={(e) => handlePieceSizeInput(e.target.value)}
+                className="w-12 px-1.5 py-0.5 text-right font-mono text-[11px] font-semibold text-slate-900 border border-slate-200 rounded bg-white focus:outline-none focus:ring-1 focus:ring-blue-600 tabular-nums"
+                aria-label="Tamaño de pieza física en centímetros"
+              />
+            </div>
+          </div>
+
+          <div className="px-2 py-1 rounded bg-slate-50 border border-slate-200 text-[11px] text-slate-700 font-mono tabular-nums">
+            {pieceSizeCm > 0 ? (
+              <>
+                Mural:{' '}
+                <span className="font-semibold text-slate-900">
+                  {formatCm(settings.gridCols * pieceSizeCm)} ×{' '}
+                  {formatCm(settings.gridRows * pieceSizeCm)} cm
+                </span>{' '}
+                <span className="text-slate-500">
+                  (piezas {formatCm(pieceSizeCm)}×{formatCm(pieceSizeCm)})
+                </span>
+              </>
+            ) : (
+              <span className="text-slate-500 font-sans">
+                Ingresa cm &gt; 0 para calcular medida física
+              </span>
+            )}
+          </div>
         </div>
       </div>
 

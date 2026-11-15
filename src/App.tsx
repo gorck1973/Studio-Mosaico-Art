@@ -1,11 +1,12 @@
 import { useMemo, useRef, useState } from 'react';
-import { Check, Copy, Download, FileSpreadsheet, Layers } from 'lucide-react';
+import { BookOpen, Check, Copy, Download, FileSpreadsheet, Layers } from 'lucide-react';
 import { CodeMatrixView } from './components/CodeMatrixView';
 import { ColorLayersBlackView } from './components/ColorLayersBlackView';
 import { ControlsSidebar } from './components/ControlsSidebar';
 import { ImageComparisonPanel } from './components/ImageComparisonPanel';
 import { PaletteAndCounts } from './components/PaletteAndCounts';
 import { PixelCanvas } from './components/PixelCanvas';
+import { WorkshopGuideModal } from './components/WorkshopGuideModal';
 import {
   AdjustmentSettings,
   colToLetters,
@@ -58,6 +59,8 @@ export default function App() {
   const [manualOverrides, setManualOverrides] = useState<Record<string, string>>({});
   const [customPalette, setCustomPalette] = useState<PaletteColor[] | null>(null);
   const [copiedGuide, setCopiedGuide] = useState(false);
+  const [pieceSizeCm, setPieceSizeCm] = useState<number>(5);
+  const [isWorkshopGuideOpen, setIsWorkshopGuideOpen] = useState(false);
 
   const lastAutoPaletteRef = useRef<PaletteColor[] | undefined>(undefined);
 
@@ -218,7 +221,8 @@ export default function App() {
       finalMosaic.stats,
       coordFormat,
       finalMosaic.cols,
-      finalMosaic.rows
+      finalMosaic.rows,
+      pieceSizeCm
     );
     try {
       await navigator.clipboard.writeText(guide);
@@ -234,11 +238,11 @@ export default function App() {
 
   return (
     <div className="min-h-screen flex flex-col bg-[#F6F7F9] text-slate-900">
-      {/* Top Bar Contract: Brand wordmark — 4 nav links — 1 primary CTA */}
-      <header className="bg-white border-b border-slate-200 px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-8">
+      {/* Top Bar */}
+      <header className="bg-white border-b border-slate-200 px-4 sm:px-6 lg:px-8 min-h-16 py-2 flex items-center justify-between gap-4 lg:gap-8">
         <a
           href="#top"
-          className="inline-flex items-center gap-2.5 text-lg font-bold tracking-tight text-slate-900 whitespace-nowrap shrink-0"
+          className="inline-flex items-center gap-2.5 shrink-0 min-w-0"
         >
           <svg
             viewBox="0 0 32 32"
@@ -291,10 +295,17 @@ export default function App() {
               strokeWidth="0.8"
             />
           </svg>
-          <span>Studio Mosaico Art</span>
+          <div className="min-w-0">
+            <span className="block text-lg font-bold tracking-tight text-slate-900 leading-tight whitespace-nowrap">
+              Studio Mosaico Art
+            </span>
+            <span className="hidden sm:block text-[11px] font-normal text-slate-500 leading-snug max-w-[340px] xl:max-w-none">
+              Plantillas con coordenadas y mezcla de tonos para murales de madera, mosaicos y pixel art físico
+            </span>
+          </div>
         </a>
 
-        <nav className="hidden md:flex items-center gap-6 text-sm font-medium text-slate-600">
+        <nav className="hidden lg:flex items-center gap-5 text-sm font-medium text-slate-600">
           <a
             href="#cuadricula"
             onClick={() => setActiveTab('studio')}
@@ -331,7 +342,8 @@ export default function App() {
                 finalMosaic.stats,
                 coordFormat,
                 finalMosaic.cols,
-                finalMosaic.rows
+                finalMosaic.rows,
+                pieceSizeCm
               );
             }}
             className="hover:text-slate-900 transition-colors whitespace-nowrap shrink-0"
@@ -340,7 +352,16 @@ export default function App() {
           </a>
         </nav>
 
-        <div className="flex items-center shrink-0">
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={() => setIsWorkshopGuideOpen(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 rounded-md transition-colors whitespace-nowrap shrink-0"
+          >
+            <BookOpen className="w-3.5 h-3.5 shrink-0" />
+            Guía de Taller
+          </button>
+
           <button
             type="button"
             onClick={() =>
@@ -350,7 +371,8 @@ export default function App() {
                 finalMosaic.stats,
                 true,
                 finalMosaic.cols,
-                finalMosaic.rows
+                finalMosaic.rows,
+                pieceSizeCm
               )
             }
             className="inline-flex items-center gap-2 px-4 py-2 text-xs font-medium text-white bg-slate-900 hover:bg-slate-800 rounded-md transition-colors whitespace-nowrap shrink-0"
@@ -447,7 +469,8 @@ export default function App() {
                   finalMosaic.stats,
                   coordFormat,
                   finalMosaic.cols,
-                  finalMosaic.rows
+                  finalMosaic.rows,
+                  pieceSizeCm
                 )
               }
               className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 transition-colors whitespace-nowrap"
@@ -486,6 +509,8 @@ export default function App() {
         <div className="flex flex-col lg:flex-row items-start gap-6">
           <ControlsSidebar
             settings={settings}
+            pieceSizeCm={pieceSizeCm}
+            onPieceSizeChange={setPieceSizeCm}
             onUpdateSettings={handleUpdateSettings}
             onResetAdjustments={handleResetAdjustments}
             onUploadFile={handleUploadFile}
@@ -509,6 +534,7 @@ export default function App() {
                   <PixelCanvas
                     cols={finalMosaic.cols}
                     rows={finalMosaic.rows}
+                    pieceSizeCm={pieceSizeCm}
                     cells={finalMosaic.cells}
                     palette={finalMosaic.palette}
                     stats={finalMosaic.stats}
@@ -567,6 +593,11 @@ export default function App() {
           </div>
         </div>
       </main>
+
+      <WorkshopGuideModal
+        isOpen={isWorkshopGuideOpen}
+        onClose={() => setIsWorkshopGuideOpen(false)}
+      />
     </div>
   );
 }

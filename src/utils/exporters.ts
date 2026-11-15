@@ -8,17 +8,28 @@ import {
 } from '../types/pixelGrid';
 import { getContrastTextColor } from './colorMath';
 
+export function formatCm(value: number): string {
+  const rounded = Math.round(value * 10) / 10;
+  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+}
+
 export function exportMosaicCsv(
   cells: GridCell[],
   stats: ColorUsageStat[],
   coordFormat: CoordFormat,
   cols: number,
-  rows: number
+  rows: number,
+  pieceSizeCm = 0
 ): void {
   const total = cols * rows;
   const usesRatio = stats[0]?.color.usesRatio ?? true;
   const lines: string[] = [];
   lines.push(`RESUMEN POR COLOR (${cols}x${rows} = ${total} PIXELES)`);
+  if (pieceSizeCm > 0) {
+    lines.push(
+      `MEDIDA FISICA ESTIMADA: ${formatCm(cols * pieceSizeCm)} cm x ${formatCm(rows * pieceSizeCm)} cm (piezas de ${formatCm(pieceSizeCm)}x${formatCm(pieceSizeCm)} cm)`
+    );
+  }
   lines.push(
     usesRatio
       ? 'Codigo,Nombre,HEX,Proporcion,Cantidad_Pixeles,Porcentaje_Area,Ubicaciones'
@@ -74,11 +85,13 @@ export function exportMosaicPng(
   stats: ColorUsageStat[],
   showCodes: boolean,
   cols: number,
-  rows: number
+  rows: number,
+  pieceSizeCm = 0
 ): void {
+  const hasPhysicalSize = pieceSizeCm > 0;
   const cellSize = cols > 26 ? 34 : 42;
   const rulerLeft = 48;
-  const rulerTop = 44;
+  const rulerTop = hasPhysicalSize ? 62 : 44;
   const padding = 36;
   const gridWidth = cols * cellSize;
   const gridHeight = rows * cellSize;
@@ -101,6 +114,16 @@ export function exportMosaicPng(
     padding,
     padding + 12
   );
+
+  if (hasPhysicalSize) {
+    ctx.fillStyle = '#475569';
+    ctx.font = '500 13px "DM Sans", system-ui, sans-serif';
+    ctx.fillText(
+      `Medida física estimada: ${formatCm(cols * pieceSizeCm)} cm × ${formatCm(rows * pieceSizeCm)} cm (piezas de ${formatCm(pieceSizeCm)}×${formatCm(pieceSizeCm)} cm)`,
+      padding,
+      padding + 32
+    );
+  }
 
   const originX = padding + rulerLeft;
   const originY = padding + rulerTop + 18;
@@ -362,10 +385,15 @@ export function buildTextGuide(
   stats: ColorUsageStat[],
   coordFormat: CoordFormat,
   cols: number,
-  rows: number
+  rows: number,
+  pieceSizeCm = 0
 ): string {
   const used = stats.filter((s) => s.count > 0);
-  const header = `STUDIO MOSAICO ART — GUÍA ${cols}×${rows} (${cols * rows} PÍXELES · ${stats.length} COLORES)\n`;
+  const physicalSuffix =
+    pieceSizeCm > 0
+      ? ` · MEDIDA FÍSICA: ${formatCm(cols * pieceSizeCm)} × ${formatCm(rows * pieceSizeCm)} cm (piezas ${formatCm(pieceSizeCm)}×${formatCm(pieceSizeCm)} cm)`
+      : '';
+  const header = `STUDIO MOSAICO ART — GUÍA ${cols}×${rows} (${cols * rows} PÍXELES · ${stats.length} COLORES${physicalSuffix})\n`;
   const rowsText = used.map((s) => {
     const coords =
       coordFormat === 'alphaNum'

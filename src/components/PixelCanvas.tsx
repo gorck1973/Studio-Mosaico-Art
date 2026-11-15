@@ -8,10 +8,12 @@ import {
   PaletteColor,
 } from '../types/pixelGrid';
 import { getContrastTextColor } from '../utils/colorMath';
+import { formatCm } from '../utils/exporters';
 
 interface PixelCanvasProps {
   cols: number;
   rows: number;
+  pieceSizeCm: number;
   cells: GridCell[];
   palette: PaletteColor[];
   stats: ColorUsageStat[];
@@ -28,6 +30,7 @@ interface PixelCanvasProps {
 export const PixelCanvas: React.FC<PixelCanvasProps> = ({
   cols,
   rows,
+  pieceSizeCm,
   cells,
   palette,
   stats,
@@ -79,7 +82,7 @@ export const PixelCanvas: React.FC<PixelCanvasProps> = ({
           <h2 className="text-base font-semibold text-slate-900">
             Cuadrícula de Píxeles ({cols} × {rows})
           </h2>
-          <div className="flex items-center gap-2 text-xs text-slate-500 mt-0.5">
+          <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 mt-0.5">
             <span className="tabular-nums">{cols} col × {rows} filas</span>
             <span aria-hidden="true">·</span>
             <span className="tabular-nums font-medium text-slate-700">
@@ -88,6 +91,15 @@ export const PixelCanvas: React.FC<PixelCanvasProps> = ({
             <span aria-hidden="true">·</span>
             <span className="tabular-nums">{palette.length} colores</span>
           </div>
+          {pieceSizeCm > 0 && (
+            <p className="text-xs text-slate-600 mt-1 tabular-nums">
+              Medida física estimada:{' '}
+              <span className="font-mono font-semibold text-slate-900">
+                {formatCm(cols * pieceSizeCm)} cm × {formatCm(rows * pieceSizeCm)} cm
+              </span>{' '}
+              usando piezas de {formatCm(pieceSizeCm)}×{formatCm(pieceSizeCm)} cm
+            </p>
+          )}
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
