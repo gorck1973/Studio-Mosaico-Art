@@ -1,0 +1,6 @@
+{
+  "name": "Mosaico 20×25 Studio",
+  "description": "Transforma imágenes en blanco y negro o color en cuadrículas exactas de 20×25 píxeles con paleta adaptativa de 25 colores, conteo por color y códigos de ubicación.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
