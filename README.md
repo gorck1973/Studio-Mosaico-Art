@@ -4,7 +4,7 @@
 
 🔗 **[Probar la aplicación en vivo aquí](https://github.io)**
 
-![Vista previa de Studio Mosaico Art](ruta-a-tu-captura.png)
+![Vista previa de Studio Mosaico Art](public/preview.png)
 
 ## ✨ ¿Para qué sirve?
 A diferencia de los editores de pixel art tradicionales diseñados solo para pantallas, **Studio Mosaico Art** está pensado para llevar diseños digitales al mundo físico (como murales hechos con cubos de madera de 5×5 cm, mosaicos cerámicos o tejidos).
