@@ -127,12 +127,45 @@ function getCropRect(
   return { sx, sy, cropW, cropH };
 }
 
+export function detectImageHasColor(
+  source: HTMLImageElement | HTMLCanvasElement
+): boolean {
+  const srcW = source instanceof HTMLImageElement ? source.naturalWidth : source.width;
+  const srcH = source instanceof HTMLImageElement ? source.naturalHeight : source.height;
+  if (!srcW || !srcH) return false;
+
+  const sampleSize = 64;
+  const canvas = document.createElement('canvas');
+  canvas.width = sampleSize;
+  canvas.height = sampleSize;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  if (!ctx) return false;
+
+  ctx.drawImage(source, 0, 0, sampleSize, sampleSize);
+  const data = ctx.getImageData(0, 0, sampleSize, sampleSize).data;
+
+  let colorfulPixels = 0;
+  const totalPixels = sampleSize * sampleSize;
+  for (let i = 0; i < data.length; i += 4) {
+    const r = data[i];
+    const g = data[i + 1];
+    const b = data[i + 2];
+    const spread = Math.max(r, g, b) - Math.min(r, g, b);
+    if (spread > 20) colorfulPixels++;
+  }
+  return colorfulPixels / totalPixels > 0.03;
+}
+
 function buildAdjustTransform(settings: AdjustmentSettings) {
   const contrastFactor =
     (259 * (settings.contrast * 2.55 + 255)) / (255 * (259 - settings.contrast * 2.55));
   const brightnessOffset = settings.brightness * 2.55;
   const gammaInv = 1 / Math.max(0.2, settings.gamma);
   const forceGrayscale = settings.visionMode === 'grayscale' || settings.grayscaleSource;
+  const useSmartColor =
+    settings.visionMode === 'color' &&
+    !settings.grayscaleSource &&
+    settings.smartColorOptimize;
 
   return (rIn: number, gIn: number, bIn: number): RGB => {
     const adj = (v: number) => {
@@ -152,6 +185,16 @@ function buildAdjustTransform(settings: AdjustmentSettings) {
       r = lum;
       g = lum;
       b = lum;
+    } else if (useSmartColor) {
+      // Gentle perceptual vibrance enhancement so downsampled mosaic tiles stay crisp and vivid
+      const maxC = Math.max(r, g, b);
+      const minC = Math.min(r, g, b);
+      const sat = maxC > 0 ? (maxC - minC) / maxC : 0;
+      const avg = 0.299 * r + 0.587 * g + 0.114 * b;
+      const vibranceAmount = 0.28 * (1 - sat * 0.65);
+      r = clampByte(r + (r - avg) * vibranceAmount);
+      g = clampByte(g + (g - avg) * vibranceAmount);
+      b = clampByte(b + (b - avg) * vibranceAmount);
     }
 
     if (settings.invert) {
@@ -321,7 +364,7 @@ export function elaboratePaletteFromPixels(
     case 'pure-colors':
       return computePureColorsPalette(count);
     case 'adaptive-kmeans':
-      return computeAdaptiveLabPalette(pixels, count);
+      return computeAdaptiveLabPalette(pixels, count, settings.smartColorOptimize);
     case 'grayscale':
     default:
       return computeGrayscalePalette(pixels, count, settings.distributionMode);
@@ -365,7 +408,7 @@ export function mapPixelsToGrid(
         }
 
         const colLetter = colToLetters(col);
-        const alphaCoord = `${colLetter}${row + 1}`;
+        const alphaCoord = `${colLetter}/${row + 1}`;
         const numericCoord = `C${String(col + 1).padStart(2, '0')}-F${String(row + 1).padStart(2, '0')}`;
 
         cells.push({

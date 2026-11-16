@@ -1,18 +1,22 @@
-import React, { useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Upload, RotateCcw, Lock, Unlock, RefreshCw } from 'lucide-react';
 import {
   AdjustmentSettings,
   GRID_PRESETS,
   PaletteMode,
+  PHYSICAL_SIZE_PRESETS,
+  PhysicalUnit,
   PURE_COLOR_SWATCHES,
 } from '../types/pixelGrid';
 
-import { formatCm } from '../utils/exporters';
+import { formatCm, formatUnitTag } from '../utils/exporters';
 
 interface ControlsSidebarProps {
   settings: AdjustmentSettings;
-  pieceSizeCm: number;
-  onPieceSizeChange: (cm: number) => void;
+  pieceSize: number;
+  pieceUnit: PhysicalUnit;
+  onPieceSizeChange: (size: number) => void;
+  onPieceUnitChange: (unit: PhysicalUnit) => void;
   onUpdateSettings: (patch: Partial<AdjustmentSettings>) => void;
   onResetAdjustments: () => void;
   onUploadFile: (file: File) => void;
@@ -21,6 +25,11 @@ interface ControlsSidebarProps {
 }
 
 const COLOR_MODES: Array<{ id: PaletteMode; label: string; desc: string }> = [
+  {
+    id: 'adaptive-kmeans',
+    label: 'Lectura Inteligente (Color Real)',
+    desc: 'Lee los colores originales y los optimiza para el mosaico',
+  },
   {
     id: 'replace-black',
     label: 'Reemplazar Negro (Color → Blanco)',
@@ -40,11 +49,6 @@ const COLOR_MODES: Array<{ id: PaletteMode; label: string; desc: string }> = [
     id: 'pure-colors',
     label: 'Colores Puros (Sin degradar)',
     desc: 'Primarios y secundarios puros + Negro y Blanco',
-  },
-  {
-    id: 'adaptive-kmeans',
-    label: 'Colores Reales (Foto)',
-    desc: 'Extrae los colores originales de la imagen cargada',
   },
 ];
 
@@ -97,8 +101,10 @@ const ColorSlotPicker: React.FC<ColorSlotPickerProps> = ({ label, value, onChang
 
 export const ControlsSidebar: React.FC<ControlsSidebarProps> = ({
   settings,
-  pieceSizeCm,
+  pieceSize,
+  pieceUnit,
   onPieceSizeChange,
+  onPieceUnitChange,
   onUpdateSettings,
   onResetAdjustments,
   onUploadFile,
@@ -106,6 +112,16 @@ export const ControlsSidebar: React.FC<ControlsSidebarProps> = ({
   onRecomputePalette,
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [colsDraft, setColsDraft] = useState<string>(String(settings.gridCols));
+  const [rowsDraft, setRowsDraft] = useState<string>(String(settings.gridRows));
+
+  useEffect(() => {
+    setColsDraft(String(settings.gridCols));
+  }, [settings.gridCols]);
+
+  useEffect(() => {
+    setRowsDraft(String(settings.gridRows));
+  }, [settings.gridRows]);
 
   const handlePieceSizeInput = (raw: string) => {
     if (raw === '') {
@@ -131,25 +147,62 @@ export const ControlsSidebar: React.FC<ControlsSidebarProps> = ({
     }
   };
 
-  const handleDimensionInput = (field: 'gridCols' | 'gridRows', raw: string) => {
+  const handleDimensionChange = (field: 'gridCols' | 'gridRows', raw: string) => {
+    if (field === 'gridCols') {
+      setColsDraft(raw);
+    } else {
+      setRowsDraft(raw);
+    }
     const parsed = parseInt(raw, 10);
     if (Number.isNaN(parsed)) return;
-    const clamped =
-      field === 'gridCols'
-        ? Math.max(8, Math.min(36, parsed))
-        : Math.max(8, Math.min(44, parsed));
-    onUpdateSettings({ [field]: clamped });
+    const min = 4;
+    const max = field === 'gridCols' ? 40 : 50;
+    if (parsed >= min) {
+      onUpdateSettings({ [field]: Math.min(max, parsed) });
+    }
+  };
+
+  const handleDimensionBlur = (field: 'gridCols' | 'gridRows') => {
+    const raw = field === 'gridCols' ? colsDraft : rowsDraft;
+    const parsed = parseInt(raw, 10);
+    const max = field === 'gridCols' ? 40 : 50;
+    const fallback = field === 'gridCols' ? settings.gridCols : settings.gridRows;
+    const clamped = Number.isNaN(parsed) ? fallback : Math.max(4, Math.min(max, parsed));
+    if (field === 'gridCols') {
+      setColsDraft(String(clamped));
+    } else {
+      setRowsDraft(String(clamped));
+    }
+    if (clamped !== fallback) {
+      onUpdateSettings({ [field]: clamped });
+    }
   };
 
   const handleVisionChange = (mode: 'grayscale' | 'color') => {
-    const nextPaletteMode: PaletteMode =
-      mode === 'grayscale' ? 'grayscale' : 'replace-black';
-    onUpdateSettings({
-      visionMode: mode,
-      paletteMode: nextPaletteMode,
-      grayscaleSource: true,
-    });
+    if (mode === 'grayscale') {
+      onUpdateSettings({
+        visionMode: 'grayscale',
+        paletteMode: 'grayscale',
+        grayscaleSource: true,
+      });
+    } else {
+      onUpdateSettings({
+        visionMode: 'color',
+        paletteMode: 'adaptive-kmeans',
+        grayscaleSource: false,
+      });
+    }
   };
+
+  const activeGridPresetId =
+    GRID_PRESETS.find((p) => p.cols === settings.gridCols && p.rows === settings.gridRows)?.id ??
+    'custom';
+
+  const unitPresets = PHYSICAL_SIZE_PRESETS[pieceUnit];
+  const unitTag = formatUnitTag(pieceUnit);
+  const matchingPiecePreset = unitPresets.find(
+    (p) => Math.abs(p.value - pieceSize) < 0.001
+  );
 
   const usesTonalDistribution =
     settings.visionMode === 'grayscale' ||
@@ -192,7 +245,7 @@ export const ControlsSidebar: React.FC<ControlsSidebarProps> = ({
         </button>
       </div>
 
-      {/* 2. Grid Resolution */}
+      {/* 2. Grid Resolution (Free-first + Optional Presets Dropdown) */}
       <div className="p-3.5 space-y-2.5">
         <div className="flex items-center justify-between gap-2">
           <h2 className="text-xs font-semibold text-slate-900">2. Tamaño de Cuadrícula</h2>
@@ -201,111 +254,158 @@ export const ControlsSidebar: React.FC<ControlsSidebarProps> = ({
           </span>
         </div>
 
-        <div className="grid grid-cols-3 gap-1.5">
-          {GRID_PRESETS.map((preset) => {
-            const active =
-              settings.gridCols === preset.cols && settings.gridRows === preset.rows;
-            return (
-              <button
-                key={preset.id}
-                type="button"
-                onClick={() =>
-                  onUpdateSettings({ gridCols: preset.cols, gridRows: preset.rows })
-                }
-                className={`py-1.5 px-2 text-xs font-mono font-medium rounded border transition-colors whitespace-nowrap ${
-                  active
-                    ? 'bg-slate-900 text-white border-slate-900'
-                    : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
-                }`}
-              >
-                {preset.label}
-              </button>
-            );
-          })}
-        </div>
-
-        <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-1.5 pt-0.5">
-          <label className="flex items-center justify-between gap-1.5 px-2 py-1 border border-slate-200 rounded bg-slate-50 text-[11px] text-slate-600">
+        <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-1.5">
+          <label className="flex items-center justify-between gap-1.5 px-2.5 py-1.5 border border-slate-200 rounded bg-white text-[11px] text-slate-600 focus-within:border-blue-600 focus-within:ring-1 focus-within:ring-blue-600">
             <span>Ancho</span>
             <input
               type="number"
-              min={8}
-              max={36}
-              value={settings.gridCols}
-              onChange={(e) => handleDimensionInput('gridCols', e.target.value)}
+              min={4}
+              max={40}
+              value={colsDraft}
+              onChange={(e) => handleDimensionChange('gridCols', e.target.value)}
+              onBlur={() => handleDimensionBlur('gridCols')}
               className="w-11 text-right font-mono font-semibold text-slate-900 bg-transparent focus:outline-none tabular-nums"
               aria-label="Columnas de cuadrícula"
             />
           </label>
           <span className="text-xs text-slate-400 font-mono">×</span>
-          <label className="flex items-center justify-between gap-1.5 px-2 py-1 border border-slate-200 rounded bg-slate-50 text-[11px] text-slate-600">
+          <label className="flex items-center justify-between gap-1.5 px-2.5 py-1.5 border border-slate-200 rounded bg-white text-[11px] text-slate-600 focus-within:border-blue-600 focus-within:ring-1 focus-within:ring-blue-600">
             <span>Alto</span>
             <input
               type="number"
-              min={8}
-              max={44}
-              value={settings.gridRows}
-              onChange={(e) => handleDimensionInput('gridRows', e.target.value)}
+              min={4}
+              max={50}
+              value={rowsDraft}
+              onChange={(e) => handleDimensionChange('gridRows', e.target.value)}
+              onBlur={() => handleDimensionBlur('gridRows')}
               className="w-11 text-right font-mono font-semibold text-slate-900 bg-transparent focus:outline-none tabular-nums"
               aria-label="Filas de cuadrícula"
             />
           </label>
         </div>
 
-        {/* Compact Physical Piece Size Calculator */}
-        <div className="pt-1.5 border-t border-slate-100 space-y-1.5">
-          <div className="flex items-center justify-between gap-1.5">
+        <div className="flex items-center justify-between gap-2">
+          <label
+            htmlFor="c-grid-preset"
+            className="text-[11px] text-slate-500 shrink-0"
+          >
+            Preconfigurados
+          </label>
+          <select
+            id="c-grid-preset"
+            value={activeGridPresetId}
+            onChange={(e) => {
+              const chosen = GRID_PRESETS.find((p) => p.id === e.target.value);
+              if (chosen) {
+                onUpdateSettings({ gridCols: chosen.cols, gridRows: chosen.rows });
+              }
+            }}
+            className="flex-1 min-w-0 px-2 py-1 text-[11px] font-medium text-slate-700 bg-slate-50 border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-600 cursor-pointer"
+          >
+            <option value="custom">Personalizado ({settings.gridCols} × {settings.gridRows})</option>
+            {GRID_PRESETS.map((preset) => (
+              <option key={preset.id} value={preset.id}>
+                {preset.label}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {/* Compact Physical Piece Size Calculator (cm / pulgadas + dropdown + free input) */}
+        <div className="pt-2 border-t border-slate-100 space-y-1.5">
+          <div className="flex items-center justify-between gap-2">
             <label
               htmlFor="c-piece-size"
               className="text-[11px] font-medium text-slate-700"
             >
-              Pieza física (cm)
+              Pieza física
             </label>
-            <div className="flex items-center gap-1">
-              {[2, 5, 10].map((cm) => (
-                <button
-                  key={cm}
-                  type="button"
-                  onClick={() => onPieceSizeChange(cm)}
-                  className={`px-1.5 py-0.5 text-[10px] font-mono rounded border transition-colors ${
-                    pieceSizeCm === cm
-                      ? 'bg-slate-900 text-white border-slate-900'
-                      : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
-                  }`}
-                >
-                  {cm}
-                </button>
+            <div className="inline-flex items-center p-0.5 bg-slate-100 rounded border border-slate-200">
+              <button
+                type="button"
+                onClick={() => onPieceUnitChange('cm')}
+                className={`px-2 py-0.5 text-[10px] font-semibold rounded-xs transition-colors ${
+                  pieceUnit === 'cm'
+                    ? 'bg-white text-slate-900 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                cm
+              </button>
+              <button
+                type="button"
+                onClick={() => onPieceUnitChange('in')}
+                className={`px-2 py-0.5 text-[10px] font-semibold rounded-xs transition-colors ${
+                  pieceUnit === 'in'
+                    ? 'bg-white text-slate-900 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                pulg
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-[1fr_76px] gap-1.5 items-center">
+            <select
+              aria-label="Medidas preconfiguradas de pieza física"
+              value={matchingPiecePreset ? String(matchingPiecePreset.value) : 'custom'}
+              onChange={(e) => {
+                if (e.target.value !== 'custom') {
+                  onPieceSizeChange(parseFloat(e.target.value));
+                }
+              }}
+              className="w-full min-w-0 px-2 py-1 text-[11px] font-medium text-slate-700 bg-slate-50 border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-600 cursor-pointer"
+            >
+              <option value="custom">Medida libre ({formatCm(pieceSize)} {unitTag})</option>
+              {unitPresets.map((preset) => (
+                <option key={preset.value} value={String(preset.value)}>
+                  {preset.label}
+                </option>
               ))}
+            </select>
+
+            <div className="flex items-center gap-1 px-2 py-1 border border-slate-200 rounded bg-white focus-within:border-blue-600 focus-within:ring-1 focus-within:ring-blue-600">
               <input
                 id="c-piece-size"
                 type="number"
                 min={0}
                 max={100}
-                step={0.5}
-                value={pieceSizeCm === 0 ? '' : pieceSizeCm}
+                step={pieceUnit === 'in' ? 0.25 : 0.5}
+                value={pieceSize === 0 ? '' : pieceSize}
                 placeholder="0"
                 onChange={(e) => handlePieceSizeInput(e.target.value)}
-                className="w-12 px-1.5 py-0.5 text-right font-mono text-[11px] font-semibold text-slate-900 border border-slate-200 rounded bg-white focus:outline-none focus:ring-1 focus:ring-blue-600 tabular-nums"
-                aria-label="Tamaño de pieza física en centímetros"
+                className="w-full text-right font-mono text-[11px] font-semibold text-slate-900 bg-transparent focus:outline-none tabular-nums"
+                aria-label={`Tamaño de pieza física en ${pieceUnit === 'in' ? 'pulgadas' : 'centímetros'}`}
               />
+              <span className="text-[10px] font-mono text-slate-500 shrink-0">
+                {unitTag}
+              </span>
             </div>
           </div>
 
-          <div className="px-2 py-1 rounded bg-slate-50 border border-slate-200 text-[11px] text-slate-700 font-mono tabular-nums">
-            {pieceSizeCm > 0 ? (
+          <div className="px-2 py-1 rounded bg-slate-50 border border-slate-200 text-[11px] text-slate-700 font-mono tabular-nums leading-snug">
+            {pieceSize > 0 ? (
               <>
                 Mural:{' '}
                 <span className="font-semibold text-slate-900">
-                  {formatCm(settings.gridCols * pieceSizeCm)} ×{' '}
-                  {formatCm(settings.gridRows * pieceSizeCm)} cm
-                </span>{' '}
-                <span className="text-slate-500">
-                  (piezas {formatCm(pieceSizeCm)}×{formatCm(pieceSizeCm)})
+                  {formatCm(settings.gridCols * (pieceUnit === 'in' ? pieceSize * 2.54 : pieceSize))} ×{' '}
+                  {formatCm(settings.gridRows * (pieceUnit === 'in' ? pieceSize * 2.54 : pieceSize))} cm
                 </span>
+                {pieceUnit === 'in' ? (
+                  <span className="block text-[10px] text-slate-500">
+                    ({formatCm(settings.gridCols * pieceSize)} × {formatCm(settings.gridRows * pieceSize)} pulg · pieza {formatCm(pieceSize * 2.54)} cm / {formatCm(pieceSize)} pulg)
+                  </span>
+                ) : (
+                  <span className="text-slate-500">
+                    {' '}
+                    (piezas {formatCm(pieceSize)}×{formatCm(pieceSize)} cm)
+                  </span>
+                )}
               </>
             ) : (
               <span className="text-slate-500 font-sans">
-                Ingresa cm &gt; 0 para calcular medida física
+                Ingresa medida &gt; 0 para calcular dimensiones
               </span>
             )}
           </div>
@@ -582,6 +682,22 @@ export const ControlsSidebar: React.FC<ControlsSidebarProps> = ({
                 );
               })}
             </div>
+
+            {settings.paletteMode === 'adaptive-kmeans' && (
+              <label className="flex items-center justify-between gap-2 px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded cursor-pointer">
+                <span className="text-[11px] font-medium text-slate-700 leading-tight">
+                  Optimización inteligente de color
+                </span>
+                <input
+                  type="checkbox"
+                  checked={settings.smartColorOptimize}
+                  onChange={(e) =>
+                    onUpdateSettings({ smartColorOptimize: e.target.checked })
+                  }
+                  className="accent-blue-600 w-3.5 h-3.5 shrink-0 cursor-pointer"
+                />
+              </label>
+            )}
 
             {/* Color Slot Pickers for 1/2/3-Color Gradients */}
             {settings.paletteMode === 'replace-black' && (

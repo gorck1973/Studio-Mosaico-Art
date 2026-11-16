@@ -4,9 +4,10 @@ import {
   getColumnLabels,
   GridCell,
   PaletteColor,
+  PhysicalUnit,
 } from '../types/pixelGrid';
 import { getContrastTextColor } from './colorMath';
-import { formatCm } from './exporters';
+import { formatPhysicalSummaryText } from './exporters';
 
 interface RenderedPdfPage {
   widthPx: number;
@@ -64,7 +65,8 @@ function renderGridPage(
   palette: PaletteColor[],
   cols: number,
   rows: number,
-  pieceSizeCm: number
+  pieceSize: number,
+  pieceUnit: PhysicalUnit
 ): RenderedPdfPage {
   const { canvas, ctx, w, h } = createA4Canvas();
   const margin = 64;
@@ -77,13 +79,13 @@ function renderGridPage(
   ctx.fillText('Studio Mosaico Art — Plantilla de Taller', margin, margin);
 
   ctx.fillStyle = '#475569';
-  ctx.font = '500 17px "DM Sans", system-ui, sans-serif';
+  ctx.font = '500 15px "DM Sans", system-ui, sans-serif';
   const physicalInfo =
-    pieceSizeCm > 0
-      ? ` · Medida física: ${formatCm(cols * pieceSizeCm)} × ${formatCm(rows * pieceSizeCm)} cm (piezas ${formatCm(pieceSizeCm)}×${formatCm(pieceSizeCm)} cm)`
+    pieceSize > 0
+      ? ` · Medida: ${formatPhysicalSummaryText(cols, rows, pieceSize, pieceUnit)}`
       : '';
   ctx.fillText(
-    `Cuadrícula: ${cols} × ${rows} (${cols * rows} píxeles) · ${palette.length} colores${physicalInfo}`,
+    `Cuadrícula: ${cols} × ${rows} (${cols * rows} px) · ${palette.length} colores${physicalInfo}`,
     margin,
     margin + 38
   );
@@ -167,7 +169,8 @@ function renderSummaryAndLocationsPages(
   coordFormat: CoordFormat,
   cols: number,
   rows: number,
-  pieceSizeCm: number
+  pieceSize: number,
+  pieceUnit: PhysicalUnit
 ): RenderedPdfPage[] {
   const pages: RenderedPdfPage[] = [];
   const margin = 64;
@@ -191,13 +194,13 @@ function renderSummaryAndLocationsPages(
     );
 
     ctx.fillStyle = '#475569';
-    ctx.font = '500 15px "DM Sans", system-ui, sans-serif';
+    ctx.font = '500 14px "DM Sans", system-ui, sans-serif';
     const physicalText =
-      pieceSizeCm > 0
-        ? ` · Mural: ${formatCm(cols * pieceSizeCm)} × ${formatCm(rows * pieceSizeCm)} cm (${formatCm(pieceSizeCm)}×${formatCm(pieceSizeCm)} cm)`
+      pieceSize > 0
+        ? ` · Mural: ${formatPhysicalSummaryText(cols, rows, pieceSize, pieceUnit)}`
         : '';
     ctx.fillText(
-      `${cols}×${rows} (${cols * rows} píxeles totales) · ${activeStats.length} de ${stats.length} tonos usados${physicalText}`,
+      `${cols}×${rows} (${cols * rows} px) · ${activeStats.length}/${stats.length} tonos${physicalText}`,
       margin,
       margin + 34
     );
@@ -398,15 +401,17 @@ export function exportMosaicPdf(
   coordFormat: CoordFormat,
   cols: number,
   rows: number,
-  pieceSizeCm = 0
+  pieceSize = 0,
+  pieceUnit: PhysicalUnit = 'cm'
 ): void {
-  const page1 = renderGridPage(cells, palette, cols, rows, pieceSizeCm);
+  const page1 = renderGridPage(cells, palette, cols, rows, pieceSize, pieceUnit);
   const summaryPages = renderSummaryAndLocationsPages(
     stats,
     coordFormat,
     cols,
     rows,
-    pieceSizeCm
+    pieceSize,
+    pieceUnit
   );
 
   const blob = buildPdfBlobFromJpegPages([page1, ...summaryPages]);

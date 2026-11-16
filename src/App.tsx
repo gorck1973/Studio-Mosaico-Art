@@ -22,6 +22,7 @@ import {
   colToLetters,
   CoordFormat,
   PaletteColor,
+  PhysicalUnit,
 } from './types/pixelGrid';
 import { hexToRgb, makePaletteColor } from './utils/colorMath';
 import { buildTextGuide, exportMosaicCsv, exportMosaicPng } from './utils/exporters';
@@ -37,6 +38,7 @@ import {
 import {
   buildDefaultStudioCanvas,
   computeColorUsageStats,
+  detectImageHasColor,
   mapPixelsToGrid,
   processMosaicPipeline,
   sampleAdjustedPixels,
@@ -48,6 +50,7 @@ const DEFAULT_SETTINGS: AdjustmentSettings = {
   visionMode: 'grayscale',
   distributionMode: 'adaptive',
   grayscaleSource: true,
+  smartColorOptimize: true,
   brightness: 0,
   contrast: 24,
   gamma: 1.0,
@@ -76,10 +79,12 @@ export default function App() {
   const [highlightedColorId, setHighlightedColorId] = useState<string | null>(null);
   const [activeBrushColorId, setActiveBrushColorId] = useState<string | null>(null);
   const [manualOverrides, setManualOverrides] = useState<Record<string, string>>({});
+  const [undoStack, setUndoStack] = useState<Array<Record<string, string>>>([]);
   const [customPalette, setCustomPalette] = useState<PaletteColor[] | null>(null);
   const [copiedGuide, setCopiedGuide] = useState(false);
   const [savedProjectFeedback, setSavedProjectFeedback] = useState(false);
-  const [pieceSizeCm, setPieceSizeCm] = useState<number>(5);
+  const [pieceSize, setPieceSize] = useState<number>(5);
+  const [pieceUnit, setPieceUnit] = useState<PhysicalUnit>('cm');
   const [isWorkshopGuideOpen, setIsWorkshopGuideOpen] = useState(false);
 
   const lastAutoPaletteRef = useRef<PaletteColor[] | undefined>(undefined);
@@ -91,7 +96,8 @@ export default function App() {
     const saved = loadAutosaveFromStorage();
     if (saved) {
       setSettings((prev) => ({ ...prev, ...saved.settings }));
-      setPieceSizeCm(saved.pieceSizeCm);
+      setPieceSize(saved.pieceSizeCm);
+      setPieceUnit(saved.pieceUnit ?? 'cm');
       setCoordFormat(saved.coordFormat);
       setCustomPalette(saved.customPalette);
       setManualOverrides(saved.manualOverrides);
@@ -117,7 +123,8 @@ export default function App() {
         fileName: uploadedFileName,
         sourceImageDataUrl: uploadedImage ? imageElementToDataUrl(uploadedImage) : null,
         settings,
-        pieceSizeCm,
+        pieceSizeCm: pieceSize,
+        pieceUnit,
         coordFormat,
         customPalette,
         manualOverrides,
@@ -127,7 +134,8 @@ export default function App() {
     return () => window.clearTimeout(timer);
   }, [
     settings,
-    pieceSizeCm,
+    pieceSize,
+    pieceUnit,
     coordFormat,
     customPalette,
     manualOverrides,
@@ -141,7 +149,7 @@ export default function App() {
   }, [uploadedImage]);
 
   const baseMosaic = useMemo(() => {
-    if (customPalette && customPalette.length === settings.paletteSize) {
+    if (customPalette && customPalette.length > 0) {
       const sampledPixels = sampleAdjustedPixels(sourceElement, settings);
       const { cells, stats } = mapPixelsToGrid(sampledPixels, customPalette, settings);
       return {
@@ -210,13 +218,27 @@ export default function App() {
     }
     if (patch.gridCols !== undefined || patch.gridRows !== undefined) {
       setManualOverrides({});
+      setUndoStack([]);
     }
     setSettings((prev) => ({ ...prev, ...patch }));
+  };
+
+  const handlePieceUnitChange = (nextUnit: PhysicalUnit) => {
+    if (nextUnit === pieceUnit) return;
+    if (pieceSize > 0) {
+      const converted =
+        nextUnit === 'in'
+          ? Math.round((pieceSize / 2.54) * 100) / 100
+          : Math.round(pieceSize * 2.54 * 100) / 100;
+      setPieceSize(converted);
+    }
+    setPieceUnit(nextUnit);
   };
 
   const handleResetAdjustments = () => {
     setCustomPalette(null);
     setManualOverrides({});
+    setUndoStack([]);
     setHighlightedColorId(null);
     setSettings((prev) => ({
       ...DEFAULT_SETTINGS,
@@ -225,6 +247,7 @@ export default function App() {
       paletteSize: prev.paletteSize,
       visionMode: prev.visionMode,
       distributionMode: prev.distributionMode,
+      smartColorOptimize: true,
       color1Hex: prev.color1Hex,
       color2Hex: prev.color2Hex,
       color3Hex: prev.color3Hex,
@@ -240,10 +263,22 @@ export default function App() {
     reader.onload = () => {
       const img = new Image();
       img.onload = () => {
+        const hasColor = detectImageHasColor(img);
         setUploadedImage(img);
         setUploadedFileName(file.name);
         setManualOverrides({});
+        setUndoStack([]);
         setCustomPalette(null);
+        setActiveBrushColorId(null);
+        setHighlightedColorId(null);
+        setSettings((prev) => ({
+          ...prev,
+          visionMode: hasColor ? 'color' : 'grayscale',
+          paletteMode: hasColor ? 'adaptive-kmeans' : 'grayscale',
+          grayscaleSource: !hasColor,
+          smartColorOptimize: true,
+          lockPalette: false,
+        }));
       };
       img.onerror = () => {
         setUploadError('No se pudo leer el archivo de imagen seleccionado.');
@@ -258,13 +293,132 @@ export default function App() {
     setSettings((prev) => ({ ...prev, lockPalette: false }));
   };
 
+  const pushUndoSnapshot = (snapshot: Record<string, string>) => {
+    setUndoStack((prev) => [...prev.slice(-39), { ...snapshot }]);
+  };
+
+  const handleBeginEditStroke = () => {
+    pushUndoSnapshot(manualOverrides);
+  };
+
   const handlePaintCell = (col: number, row: number, colorId: string) => {
+    const idx = row * finalMosaic.cols + col;
+    const cell = finalMosaic.cells[idx];
+    const baseCell = baseMosaic.cells[idx];
+    if (!cell || !baseCell) return;
+
+    setManualOverrides((prev) => {
+      if (baseCell.colorId === colorId) {
+        if (!(cell.alphaCoord in prev)) return prev;
+        const next = { ...prev };
+        delete next[cell.alphaCoord];
+        return next;
+      }
+      if (prev[cell.alphaCoord] === colorId) return prev;
+      return {
+        ...prev,
+        [cell.alphaCoord]: colorId,
+      };
+    });
+  };
+
+  const handleRestoreCell = (col: number, row: number) => {
     const cell = finalMosaic.cells[row * finalMosaic.cols + col];
     if (!cell) return;
-    setManualOverrides((prev) => ({
-      ...prev,
-      [cell.alphaCoord]: colorId,
-    }));
+    setManualOverrides((prev) => {
+      if (!(cell.alphaCoord in prev)) return prev;
+      const next = { ...prev };
+      delete next[cell.alphaCoord];
+      return next;
+    });
+  };
+
+  const handleFloodFill = (startCol: number, startRow: number, targetColorId: string) => {
+    const { cols, rows, cells } = finalMosaic;
+    const startIdx = startRow * cols + startCol;
+    const startCell = cells[startIdx];
+    if (!startCell || startCell.colorId === targetColorId) return;
+
+    const sourceColorId = startCell.colorId;
+    pushUndoSnapshot(manualOverrides);
+
+    const visited = new Uint8Array(cols * rows);
+    const queue: Array<[number, number]> = [[startCol, startRow]];
+    visited[startIdx] = 1;
+
+    const nextOverrides = { ...manualOverrides };
+
+    while (queue.length > 0) {
+      const [c, r] = queue.shift()!;
+      const idx = r * cols + c;
+      const cell = cells[idx];
+      const baseCell = baseMosaic.cells[idx];
+      if (!cell || !baseCell) continue;
+
+      if (baseCell.colorId === targetColorId) {
+        delete nextOverrides[cell.alphaCoord];
+      } else {
+        nextOverrides[cell.alphaCoord] = targetColorId;
+      }
+
+      const neighbors: Array<[number, number]> = [
+        [c - 1, r],
+        [c + 1, r],
+        [c, r - 1],
+        [c, r + 1],
+      ];
+
+      for (const [nc, nr] of neighbors) {
+        if (nc < 0 || nc >= cols || nr < 0 || nr >= rows) continue;
+        const nIdx = nr * cols + nc;
+        if (visited[nIdx]) continue;
+        if (cells[nIdx]?.colorId === sourceColorId) {
+          visited[nIdx] = 1;
+          queue.push([nc, nr]);
+        }
+      }
+    }
+
+    setManualOverrides(nextOverrides);
+  };
+
+  const handleUndoEdit = () => {
+    setUndoStack((prev) => {
+      if (prev.length === 0) return prev;
+      const last = prev[prev.length - 1];
+      setManualOverrides(last);
+      return prev.slice(0, -1);
+    });
+  };
+
+  const handleAddCustomColor = (hex: string) => {
+    const normalized = hex.toUpperCase();
+    const existing = finalMosaic.palette.find(
+      (c) => c.hex.toUpperCase() === normalized
+    );
+    if (existing) {
+      setActiveBrushColorId(existing.id);
+      return;
+    }
+
+    const baseList = finalMosaic.palette;
+    const nextIndex = baseList.length + 1;
+    const rgb = hexToRgb(normalized);
+    const newColor = makePaletteColor(
+      nextIndex,
+      rgb,
+      'color',
+      undefined,
+      false,
+      undefined,
+      undefined,
+      baseList[0]?.usesRatio ?? false
+    );
+    // Ensure unique id if grayscale G01..G20 mixes with custom C21
+    const updatedPalette = [...baseList, newColor];
+    setCustomPalette(updatedPalette);
+    setSettings((prev) => ({ ...prev, lockPalette: true }));
+    setActiveBrushColorId(newColor.id);
   };
 
   const handleUpdatePaletteColorHex = (colorId: string, newHex: string) => {
@@ -293,7 +447,8 @@ export default function App() {
       coordFormat,
       finalMosaic.cols,
       finalMosaic.rows,
-      pieceSizeCm
+      pieceSize,
+      pieceUnit
     );
     try {
       await navigator.clipboard.writeText(guide);
@@ -312,7 +467,8 @@ export default function App() {
       fileName: uploadedFileName,
       sourceImageDataUrl: uploadedImage ? imageElementToDataUrl(uploadedImage) : null,
       settings,
-      pieceSizeCm,
+      pieceSizeCm: pieceSize,
+      pieceUnit,
       coordFormat,
       customPalette,
       manualOverrides,
@@ -329,10 +485,12 @@ export default function App() {
       try {
         const project = parseProjectFile(String(reader.result ?? ''));
         setSettings((prev) => ({ ...prev, ...project.settings }));
-        setPieceSizeCm(project.pieceSizeCm);
+        setPieceSize(project.pieceSizeCm);
+        setPieceUnit(project.pieceUnit ?? 'cm');
         setCoordFormat(project.coordFormat);
         setCustomPalette(project.customPalette);
         setManualOverrides(project.manualOverrides);
+        setUndoStack([]);
         setUploadedFileName(project.fileName);
         setHighlightedColorId(null);
         setActiveBrushColorId(null);
@@ -467,7 +625,8 @@ export default function App() {
                 coordFormat,
                 finalMosaic.cols,
                 finalMosaic.rows,
-                pieceSizeCm
+                pieceSize,
+                pieceUnit
               );
             }}
             className="hover:text-slate-900 transition-colors whitespace-nowrap shrink-0"
@@ -496,7 +655,8 @@ export default function App() {
                 true,
                 finalMosaic.cols,
                 finalMosaic.rows,
-                pieceSizeCm
+                pieceSize,
+                pieceUnit
               )
             }
             className="inline-flex items-center gap-2 px-4 py-2 text-xs font-medium text-white bg-slate-900 hover:bg-slate-800 rounded-md transition-colors whitespace-nowrap shrink-0"
@@ -595,7 +755,8 @@ export default function App() {
                   coordFormat,
                   finalMosaic.cols,
                   finalMosaic.rows,
-                  pieceSizeCm
+                  pieceSize,
+                  pieceUnit
                 )
               }
               title="Descargar hoja imprimible en PDF (cuadrícula, conteos y coordenadas)"
@@ -614,7 +775,8 @@ export default function App() {
                   coordFormat,
                   finalMosaic.cols,
                   finalMosaic.rows,
-                  pieceSizeCm
+                  pieceSize,
+                  pieceUnit
                 )
               }
               className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 transition-colors whitespace-nowrap"
@@ -690,8 +852,10 @@ export default function App() {
         <div className="flex flex-col lg:flex-row items-start gap-6">
           <ControlsSidebar
             settings={settings}
-            pieceSizeCm={pieceSizeCm}
-            onPieceSizeChange={setPieceSizeCm}
+            pieceSize={pieceSize}
+            pieceUnit={pieceUnit}
+            onPieceSizeChange={setPieceSize}
+            onPieceUnitChange={handlePieceUnitChange}
             onUpdateSettings={handleUpdateSettings}
             onResetAdjustments={handleResetAdjustments}
             onUploadFile={handleUploadFile}
@@ -715,7 +879,8 @@ export default function App() {
                   <PixelCanvas
                     cols={finalMosaic.cols}
                     rows={finalMosaic.rows}
-                    pieceSizeCm={pieceSizeCm}
+                    pieceSize={pieceSize}
+                    pieceUnit={pieceUnit}
                     cells={finalMosaic.cells}
                     palette={finalMosaic.palette}
                     stats={finalMosaic.stats}
@@ -723,12 +888,21 @@ export default function App() {
                     highlightedColorId={highlightedColorId}
                     activeBrushColorId={activeBrushColorId}
                     hasManualEdits={Object.keys(manualOverrides).length > 0}
+                    canUndo={undoStack.length > 0}
+                    onBeginEditStroke={handleBeginEditStroke}
                     onPaintCell={handlePaintCell}
+                    onRestoreCell={handleRestoreCell}
+                    onFloodFill={handleFloodFill}
+                    onUndoEdit={handleUndoEdit}
                     onSelectBrushColor={setActiveBrushColorId}
+                    onAddCustomColor={handleAddCustomColor}
                     onToggleHighlight={(id) =>
                       setHighlightedColorId((prev) => (prev === id ? null : id))
                     }
-                    onResetManualEdits={() => setManualOverrides({})}
+                    onResetManualEdits={() => {
+                      pushUndoSnapshot(manualOverrides);
+                      setManualOverrides({});
+                    }}
                   />
                 </div>
 

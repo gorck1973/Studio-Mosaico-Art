@@ -2,6 +2,7 @@ import {
   AdjustmentSettings,
   CoordFormat,
   PaletteColor,
+  PhysicalUnit,
 } from '../types/pixelGrid';
 
 export interface MosaicProjectFile {
@@ -12,6 +13,7 @@ export interface MosaicProjectFile {
   sourceImageDataUrl: string | null;
   settings: AdjustmentSettings;
   pieceSizeCm: number;
+  pieceUnit?: PhysicalUnit;
   coordFormat: CoordFormat;
   customPalette: PaletteColor[] | null;
   manualOverrides: Record<string, string>;
@@ -70,8 +72,15 @@ export function parseProjectFile(rawJson: string): MosaicProjectFile {
     fileName: typeof parsed.fileName === 'string' ? parsed.fileName : null,
     sourceImageDataUrl:
       typeof parsed.sourceImageDataUrl === 'string' ? parsed.sourceImageDataUrl : null,
-    settings: parsed.settings,
+    settings: {
+      ...parsed.settings,
+      smartColorOptimize:
+        typeof parsed.settings.smartColorOptimize === 'boolean'
+          ? parsed.settings.smartColorOptimize
+          : true,
+    },
     pieceSizeCm: typeof parsed.pieceSizeCm === 'number' ? parsed.pieceSizeCm : 5,
+    pieceUnit: parsed.pieceUnit === 'in' ? 'in' : 'cm',
     coordFormat: parsed.coordFormat === 'colRow' ? 'colRow' : 'alphaNum',
     customPalette: Array.isArray(parsed.customPalette) ? parsed.customPalette : null,
     manualOverrides:

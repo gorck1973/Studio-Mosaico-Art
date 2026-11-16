@@ -1,10 +1,33 @@
-export type GridPresetId = '15x19' | '20x25' | '25x31' | 'custom';
+export type GridPresetId = '15x19' | '20x25' | '25x31' | '30x38' | 'custom';
 
 export const GRID_PRESETS: Array<{ id: Exclude<GridPresetId, 'custom'>; cols: number; rows: number; label: string }> = [
-  { id: '15x19', cols: 15, rows: 19, label: '15 × 19' },
-  { id: '20x25', cols: 20, rows: 25, label: '20 × 25' },
-  { id: '25x31', cols: 25, rows: 31, label: '25 × 31' },
+  { id: '15x19', cols: 15, rows: 19, label: '15 × 19 (285 px)' },
+  { id: '20x25', cols: 20, rows: 25, label: '20 × 25 (500 px)' },
+  { id: '25x31', cols: 25, rows: 31, label: '25 × 31 (775 px)' },
+  { id: '30x38', cols: 30, rows: 38, label: '30 × 38 (1140 px)' },
 ];
+
+export type PhysicalUnit = 'cm' | 'in';
+
+export const PHYSICAL_SIZE_PRESETS: Record<PhysicalUnit, Array<{ value: number; label: string }>> = {
+  cm: [
+    { value: 1, label: '1 × 1 cm (mini tesela)' },
+    { value: 2, label: '2 × 2 cm (cubo pequeño)' },
+    { value: 2.5, label: '2.5 × 2.5 cm' },
+    { value: 3, label: '3 × 3 cm' },
+    { value: 5, label: '5 × 5 cm (cubo estándar)' },
+    { value: 7.5, label: '7.5 × 7.5 cm' },
+    { value: 10, label: '10 × 10 cm (bloque grande)' },
+  ],
+  in: [
+    { value: 0.5, label: '0.5" × 0.5" (1/2 pulg.)' },
+    { value: 1, label: '1" × 1" (pulgada estándar)' },
+    { value: 1.5, label: '1.5" × 1.5" (1 1/2 pulg.)' },
+    { value: 2, label: '2" × 2" (bloque 2 pulg.)' },
+    { value: 3, label: '3" × 3"' },
+    { value: 4, label: '4" × 4"' },
+  ],
+};
 
 export type ColorVisionMode = 'grayscale' | 'color';
 
@@ -100,6 +123,7 @@ export interface AdjustmentSettings {
   visionMode: ColorVisionMode;
   distributionMode: DistributionMode;
   grayscaleSource: boolean;
+  smartColorOptimize: boolean;
   brightness: number;
   contrast: number;
   gamma: number;

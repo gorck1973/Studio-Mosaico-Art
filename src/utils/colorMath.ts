@@ -435,51 +435,68 @@ export function computePureColorsPalette(totalColors: number): PaletteColor[] {
   );
 }
 
-export function computeAdaptiveLabPalette(pixels: RGB[], totalColors: number): PaletteColor[] {
-  const interiorTarget = Math.max(0, totalColors - 2);
-  if (interiorTarget === 0 || pixels.length === 0) {
+export function computeAdaptiveLabPalette(
+  pixels: RGB[],
+  totalColors: number,
+  smartOptimize = true
+): PaletteColor[] {
+  const targetCount = Math.max(2, totalColors);
+  if (pixels.length === 0) {
     return [
-      makePaletteColor(1, { r: 0, g: 0, b: 0 }, 'color', 'Negro Puro', true, 0, '100/0'),
-      makePaletteColor(2, { r: 255, g: 255, b: 255 }, 'color', 'Blanco Puro', true, 1, '0/100'),
+      makePaletteColor(1, { r: 0, g: 0, b: 0 }, 'color', 'Negro Puro', true, 0),
+      makePaletteColor(2, { r: 255, g: 255, b: 255 }, 'color', 'Blanco Puro', true, 1),
     ];
   }
 
-  const pixelLabs = pixels.map((rgb) => ({ rgb, lab: rgbToLab(rgb) }));
-  const maxChroma = pixelLabs.reduce((acc, p) => Math.max(acc, Math.hypot(p.lab[1], p.lab[2])), 0);
+  const pixelLabs = pixels.map((rgb) => {
+    const lab = rgbToLab(rgb);
+    const chroma = Math.hypot(lab[1], lab[2]);
+    // Salience weight prioritizes crisp chromatic accents slightly over flat backgrounds
+    const weight = smartOptimize ? 1 + Math.min(2.2, chroma / 32) : 1;
+    return { rgb, lab, chroma, weight };
+  });
 
+  const maxChroma = pixelLabs.reduce((acc, p) => Math.max(acc, p.chroma), 0);
   if (maxChroma < 5) {
-    return computePureColorsPalette(totalColors);
+    return computeGrayscalePalette(pixels, totalColors, 'adaptive');
   }
 
-  const candidates = pixelLabs.filter((p) => p.lab[0] > 4 && p.lab[0] < 97);
-  const pool = candidates.length >= interiorTarget ? candidates : pixelLabs;
+  // Deterministic farthest-point / salience-weighted seeding in perceptual CIE Lab space
+  const sortedByL = [...pixelLabs].sort((a, b) => a.lab[0] - b.lab[0]);
+  const seedIndices: number[] = [];
+  const centroids: [number, number, number][] = [];
 
-  const sortedByL = [...pool].sort((a, b) => a.lab[0] - b.lab[0]);
-  const centroids: [number, number, number][] = [
-    [...sortedByL[Math.floor(sortedByL.length / 2)].lab],
-  ];
+  // Seed darkest and lightest actual tones first so tonal dynamic range is preserved
+  centroids.push([...sortedByL[0].lab]);
+  if (targetCount > 1 && sortedByL.length > 1) {
+    centroids.push([...sortedByL[sortedByL.length - 1].lab]);
+  }
 
-  while (centroids.length < interiorTarget) {
-    let bestLab: [number, number, number] = pool[0].lab;
-    let bestMinDist = -1;
-    for (const p of pool) {
+  while (centroids.length < targetCount && centroids.length < pixelLabs.length) {
+    let bestIdx = 0;
+    let bestScore = -1;
+    for (let i = 0; i < pixelLabs.length; i++) {
+      if (seedIndices.includes(i)) continue;
+      const p = pixelLabs[i];
       let minDist = Infinity;
       for (const c of centroids) {
         const d = labDistanceSq(p.lab, c);
         if (d < minDist) minDist = d;
       }
-      if (minDist > bestMinDist) {
-        bestMinDist = minDist;
-        bestLab = p.lab;
+      const score = minDist * p.weight;
+      if (score > bestScore) {
+        bestScore = score;
+        bestIdx = i;
       }
     }
-    centroids.push([...bestLab]);
+    seedIndices.push(bestIdx);
+    centroids.push([...pixelLabs[bestIdx].lab]);
   }
 
   let centroidRgbs: RGB[] = centroids.map((lab) => {
-    let closest = pool[0].rgb;
+    let closest = pixelLabs[0].rgb;
     let minD = Infinity;
-    for (const p of pool) {
+    for (const p of pixelLabs) {
       const d = labDistanceSq(p.lab, lab);
       if (d < minD) {
         minD = d;
@@ -489,11 +506,12 @@ export function computeAdaptiveLabPalette(pixels: RGB[], totalColors: number): P
     return { ...closest };
   });
 
-  for (let iter = 0; iter < 10; iter++) {
+  // Weighted CIE Lab K-Means refinement
+  for (let iter = 0; iter < 12; iter++) {
     const centroidLabs = centroidRgbs.map(rgbToLab);
-    const sums = centroidRgbs.map(() => ({ r: 0, g: 0, b: 0, count: 0 }));
+    const sums = centroidRgbs.map(() => ({ r: 0, g: 0, b: 0, wSum: 0 }));
 
-    for (const p of pool) {
+    for (const p of pixelLabs) {
       let bestIdx = 0;
       let bestDist = Infinity;
       for (let c = 0; c < centroidLabs.length; c++) {
@@ -503,58 +521,56 @@ export function computeAdaptiveLabPalette(pixels: RGB[], totalColors: number): P
           bestIdx = c;
         }
       }
-      sums[bestIdx].r += p.rgb.r;
-      sums[bestIdx].g += p.rgb.g;
-      sums[bestIdx].b += p.rgb.b;
-      sums[bestIdx].count++;
+      sums[bestIdx].r += p.rgb.r * p.weight;
+      sums[bestIdx].g += p.rgb.g * p.weight;
+      sums[bestIdx].b += p.rgb.b * p.weight;
+      sums[bestIdx].wSum += p.weight;
     }
 
     centroidRgbs = centroidRgbs.map((prev, idx) =>
-      sums[idx].count > 0
+      sums[idx].wSum > 0
         ? {
-            r: Math.round(sums[idx].r / sums[idx].count),
-            g: Math.round(sums[idx].g / sums[idx].count),
-            b: Math.round(sums[idx].b / sums[idx].count),
+            r: clampByte(sums[idx].r / sums[idx].wSum),
+            g: clampByte(sums[idx].g / sums[idx].wSum),
+            b: clampByte(sums[idx].b / sums[idx].wSum),
           }
         : prev
     );
   }
 
-  const uniqueInterior: RGB[] = [];
+  // Deduplicate exact hex matches
+  const uniqueColors: RGB[] = [];
   for (const c of centroidRgbs) {
     const key = rgbToHex(c);
-    if (key !== '#000000' && key !== '#FFFFFF' && !uniqueInterior.some((u) => rgbToHex(u) === key)) {
-      uniqueInterior.push(c);
+    if (!uniqueColors.some((u) => rgbToHex(u) === key)) {
+      uniqueColors.push(c);
     }
   }
 
-  let step = 1;
-  while (uniqueInterior.length < interiorTarget) {
-    const gray = Math.round((step / (interiorTarget + 1)) * 255);
-    const candidate = { r: gray, g: gray, b: gray };
-    if (!uniqueInterior.some((u) => Math.abs(getLuminance(u) - gray) < 5)) {
-      uniqueInterior.push(candidate);
+  // Fill any remaining slots from distinct source pixels if image has fewer unique tones
+  if (uniqueColors.length < targetCount) {
+    for (const p of pixelLabs) {
+      const key = rgbToHex(p.rgb);
+      if (!uniqueColors.some((u) => rgbToHex(u) === key)) {
+        uniqueColors.push({ ...p.rgb });
+        if (uniqueColors.length >= targetCount) break;
+      }
     }
-    step++;
-    if (step > 60) break;
   }
 
-  uniqueInterior.sort((a, b) => getLuminance(a) - getLuminance(b));
+  uniqueColors.sort((a, b) => getLuminance(a) - getLuminance(b));
 
-  const allRgbs: { rgb: RGB; anchor?: boolean; name?: string }[] = [
-    { rgb: { r: 0, g: 0, b: 0 }, anchor: true, name: 'Negro Puro' },
-    ...uniqueInterior.slice(0, interiorTarget).map((rgb) => ({ rgb })),
-    { rgb: { r: 255, g: 255, b: 255 }, anchor: true, name: 'Blanco Puro' },
-  ];
+  const finalSlice = uniqueColors.slice(0, targetCount);
+  const denom = Math.max(1, finalSlice.length - 1);
 
-  return allRgbs.map((item, idx) =>
+  return finalSlice.map((rgb, idx) =>
     makePaletteColor(
       idx + 1,
-      item.rgb,
+      rgb,
       'color',
-      item.name,
-      item.anchor,
-      idx / (allRgbs.length - 1)
+      undefined,
+      idx === 0 || idx === finalSlice.length - 1,
+      idx / denom
     )
   );
 }

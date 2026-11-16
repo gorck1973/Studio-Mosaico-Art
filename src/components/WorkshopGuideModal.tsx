@@ -65,10 +65,9 @@ export const WorkshopGuideModal: React.FC<WorkshopGuideModalProps> = ({
                 1. Ajusta la cuadrícula y la medida de tus bloques
               </h3>
               <p className="text-xs text-slate-600 leading-relaxed">
-                Carga tu imagen y define el número de columnas y filas (por ejemplo{' '}
-                <span className="font-mono font-medium text-slate-800">20×25</span>). En{' '}
-                <span className="font-medium text-slate-800">Tamaño de pieza física (cm)</span>{' '}
-                indica cuánto mide cada cubo o azulejo para obtener al instante el ancho y alto real de tu obra.
+                Carga tu imagen (en blanco y negro o a color) y define libremente el número de columnas y filas. En{' '}
+                <span className="font-medium text-slate-800">Pieza física</span>{' '}
+                elige entre centímetros o pulgadas e indica el tamaño de cada cubo o tesela para calcular la medida real de tu obra.
               </p>
             </div>
           </div>

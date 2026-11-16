@@ -5,12 +5,45 @@ import {
   getColumnLabels,
   GridCell,
   PaletteColor,
+  PhysicalUnit,
 } from '../types/pixelGrid';
 import { getContrastTextColor } from './colorMath';
 
 export function formatCm(value: number): string {
-  const rounded = Math.round(value * 10) / 10;
-  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+  const rounded = Math.round(value * 100) / 100;
+  return Number.isInteger(rounded) ? String(rounded) : String(Number(rounded.toFixed(2)));
+}
+
+export function formatUnitTag(unit: PhysicalUnit): string {
+  return unit === 'in' ? 'pulg' : 'cm';
+}
+
+export function getPhysicalMeasurements(
+  cols: number,
+  rows: number,
+  pieceSize: number,
+  pieceUnit: PhysicalUnit = 'cm'
+) {
+  const pieceCm = pieceUnit === 'in' ? pieceSize * 2.54 : pieceSize;
+  const widthCm = cols * pieceCm;
+  const heightCm = rows * pieceCm;
+  const widthIn = pieceUnit === 'in' ? cols * pieceSize : widthCm / 2.54;
+  const heightIn = pieceUnit === 'in' ? rows * pieceSize : heightCm / 2.54;
+  const pieceIn = pieceUnit === 'in' ? pieceSize : pieceSize / 2.54;
+  return { pieceCm, widthCm, heightCm, pieceIn, widthIn, heightIn };
+}
+
+export function formatPhysicalSummaryText(
+  cols: number,
+  rows: number,
+  pieceSize: number,
+  pieceUnit: PhysicalUnit = 'cm'
+): string {
+  const m = getPhysicalMeasurements(cols, rows, pieceSize, pieceUnit);
+  if (pieceUnit === 'in') {
+    return `${formatCm(m.widthCm)} cm x ${formatCm(m.heightCm)} cm (${formatCm(m.widthIn)} x ${formatCm(m.heightIn)} pulg) · piezas de ${formatCm(m.pieceCm)}x${formatCm(m.pieceCm)} cm (${formatCm(m.pieceIn)}x${formatCm(m.pieceIn)} pulg)`;
+  }
+  return `${formatCm(m.widthCm)} cm x ${formatCm(m.heightCm)} cm · piezas de ${formatCm(m.pieceCm)}x${formatCm(m.pieceCm)} cm`;
 }
 
 export function exportMosaicCsv(
@@ -19,15 +52,16 @@ export function exportMosaicCsv(
   coordFormat: CoordFormat,
   cols: number,
   rows: number,
-  pieceSizeCm = 0
+  pieceSize = 0,
+  pieceUnit: PhysicalUnit = 'cm'
 ): void {
   const total = cols * rows;
   const usesRatio = stats[0]?.color.usesRatio ?? true;
   const lines: string[] = [];
   lines.push(`RESUMEN POR COLOR (${cols}x${rows} = ${total} PIXELES)`);
-  if (pieceSizeCm > 0) {
+  if (pieceSize > 0) {
     lines.push(
-      `MEDIDA FISICA ESTIMADA: ${formatCm(cols * pieceSizeCm)} cm x ${formatCm(rows * pieceSizeCm)} cm (piezas de ${formatCm(pieceSizeCm)}x${formatCm(pieceSizeCm)} cm)`
+      `MEDIDA FISICA ESTIMADA: ${formatPhysicalSummaryText(cols, rows, pieceSize, pieceUnit)}`
     );
   }
   lines.push(
@@ -86,9 +120,10 @@ export function exportMosaicPng(
   showCodes: boolean,
   cols: number,
   rows: number,
-  pieceSizeCm = 0
+  pieceSize = 0,
+  pieceUnit: PhysicalUnit = 'cm'
 ): void {
-  const hasPhysicalSize = pieceSizeCm > 0;
+  const hasPhysicalSize = pieceSize > 0;
   const cellSize = cols > 26 ? 34 : 42;
   const rulerLeft = 48;
   const rulerTop = hasPhysicalSize ? 62 : 44;
@@ -119,7 +154,7 @@ export function exportMosaicPng(
     ctx.fillStyle = '#475569';
     ctx.font = '500 13px "DM Sans", system-ui, sans-serif';
     ctx.fillText(
-      `Medida física estimada: ${formatCm(cols * pieceSizeCm)} cm × ${formatCm(rows * pieceSizeCm)} cm (piezas de ${formatCm(pieceSizeCm)}×${formatCm(pieceSizeCm)} cm)`,
+      `Medida física estimada: ${formatPhysicalSummaryText(cols, rows, pieceSize, pieceUnit)}`,
       padding,
       padding + 32
     );
@@ -386,12 +421,13 @@ export function buildTextGuide(
   coordFormat: CoordFormat,
   cols: number,
   rows: number,
-  pieceSizeCm = 0
+  pieceSize = 0,
+  pieceUnit: PhysicalUnit = 'cm'
 ): string {
   const used = stats.filter((s) => s.count > 0);
   const physicalSuffix =
-    pieceSizeCm > 0
-      ? ` · MEDIDA FÍSICA: ${formatCm(cols * pieceSizeCm)} × ${formatCm(rows * pieceSizeCm)} cm (piezas ${formatCm(pieceSizeCm)}×${formatCm(pieceSizeCm)} cm)`
+    pieceSize > 0
+      ? ` · MEDIDA FÍSICA: ${formatPhysicalSummaryText(cols, rows, pieceSize, pieceUnit)}`
       : '';
   const header = `STUDIO MOSAICO ART — GUÍA ${cols}×${rows} (${cols * rows} PÍXELES · ${stats.length} COLORES${physicalSuffix})\n`;
   const rowsText = used.map((s) => {
