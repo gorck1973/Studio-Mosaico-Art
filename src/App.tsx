@@ -629,7 +629,7 @@ export default function App() {
               Studio Mosaico Art
             </span>
             <span className="hidden sm:block text-[11px] font-normal text-slate-500 leading-snug">
-              Editor para pixel art
+              Editor de imágenes para pixel art
             </span>
           </div>
         </a>
