@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Copy, Check, LocateFixed } from 'lucide-react';
+import { Copy, Check, LocateFixed, Trash2 } from 'lucide-react';
 import { ColorUsageStat, CoordFormat } from '../types/pixelGrid';
 import { getContrastTextColor } from '../utils/colorMath';
 
@@ -11,6 +11,8 @@ interface PaletteAndCountsProps {
   onToggleHighlight: (colorId: string) => void;
   onUpdatePaletteColorHex: (colorId: string, newHex: string) => void;
   onSelectBrushColor: (colorId: string) => void;
+  onDeletePaletteColor: (colorId: string) => void;
+  onPruneUnusedColors: () => void;
 }
 
 export const PaletteAndCounts: React.FC<PaletteAndCountsProps> = ({
@@ -21,12 +23,16 @@ export const PaletteAndCounts: React.FC<PaletteAndCountsProps> = ({
   onToggleHighlight,
   onUpdatePaletteColorHex,
   onSelectBrushColor,
+  onDeletePaletteColor,
+  onPruneUnusedColors,
 }) => {
   const [expandedColorId, setExpandedColorId] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [showUnused, setShowUnused] = useState(true);
 
   const activeColorsCount = stats.filter((s) => s.count > 0).length;
+  const unusedColorsCount = stats.length - activeColorsCount;
+  const canPruneUnused = unusedColorsCount > 0 && activeColorsCount >= 2;
   const totalCount = stats.reduce((acc, s) => acc + s.count, 0);
   const visibleStats = showUnused ? stats : stats.filter((s) => s.count > 0);
   const usesRatio = stats[0]?.color.usesRatio ?? true;
@@ -67,15 +73,29 @@ export const PaletteAndCounts: React.FC<PaletteAndCountsProps> = ({
           </div>
         </div>
 
-        <label className="inline-flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={showUnused}
-            onChange={(e) => setShowUnused(e.target.checked)}
-            className="rounded border-slate-300 accent-blue-600"
-          />
-          Mostrar tonos con 0 píxeles
-        </label>
+        <div className="flex flex-wrap items-center gap-3">
+          {canPruneUnused && (
+            <button
+              type="button"
+              onClick={onPruneUnusedColors}
+              title="Eliminar de la paleta todos los tonos que quedaron con 0 píxeles"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md border border-red-200 bg-red-50 text-red-800 hover:bg-red-100 transition-colors whitespace-nowrap"
+            >
+              <Trash2 className="w-3.5 h-3.5 shrink-0" />
+              Limpiar sin uso ({unusedColorsCount})
+            </button>
+          )}
+
+          <label className="inline-flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={showUnused}
+              onChange={(e) => setShowUnused(e.target.checked)}
+              className="rounded border-slate-300 accent-blue-600"
+            />
+            Mostrar tonos con 0 píxeles
+          </label>
+        </div>
       </div>
 
       {/* Swatch Matrix Strip */}
@@ -235,6 +255,26 @@ export const PaletteAndCounts: React.FC<PaletteAndCountsProps> = ({
                           )}
                         </button>
                       )}
+                      <button
+                        type="button"
+                        onClick={() => onDeletePaletteColor(stat.color.id)}
+                        disabled={stats.length <= 2}
+                        className={`p-1.5 rounded border transition-colors ${
+                          stats.length > 2
+                            ? 'border-slate-200 bg-white text-slate-500 hover:text-red-700 hover:border-red-200 hover:bg-red-50'
+                            : 'border-slate-200 bg-slate-100 text-slate-300 cursor-not-allowed'
+                        }`}
+                        title={
+                          stats.length <= 2
+                            ? 'Se requieren al menos 2 tonos en la paleta'
+                            : stat.count === 0
+                            ? `Eliminar tono ${stat.color.id} (0 px) de la paleta`
+                            : `Eliminar tono ${stat.color.id} (sus ${stat.count} px pasarán al tono más parecido)`
+                        }
+                        aria-label={`Eliminar tono ${stat.color.id} de la paleta`}
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
                     </div>
                   </td>
                 </tr>

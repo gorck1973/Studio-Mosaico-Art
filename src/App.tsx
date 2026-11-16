@@ -24,7 +24,7 @@ import {
   PaletteColor,
   PhysicalUnit,
 } from './types/pixelGrid';
-import { hexToRgb, makePaletteColor } from './utils/colorMath';
+import { hexToRgb, labDistanceSq, makePaletteColor, rgbToLab } from './utils/colorMath';
 import { buildTextGuide, exportMosaicCsv, exportMosaicPng } from './utils/exporters';
 import { exportMosaicPdf } from './utils/pdfExporter';
 import {
@@ -414,11 +414,103 @@ export default function App() {
       undefined,
       baseList[0]?.usesRatio ?? false
     );
-    // Ensure unique id if grayscale G01..G20 mixes with custom C21
     const updatedPalette = [...baseList, newColor];
     setCustomPalette(updatedPalette);
-    setSettings((prev) => ({ ...prev, lockPalette: true }));
+    setSettings((prev) => ({
+      ...prev,
+      paletteSize: updatedPalette.length,
+      lockPalette: true,
+    }));
     setActiveBrushColorId(newColor.id);
+  };
+
+  const applyPaletteCleanup = (
+    keptColors: PaletteColor[],
+    deletedToReplacementId?: Map<string, string>
+  ) => {
+    const idMap = new Map<string, string>();
+    const newPalette = keptColors.map((c, idx) => {
+      const newIndex = idx + 1;
+      const prefix = c.id.startsWith('G') ? 'G' : 'C';
+      const newId = `${prefix}${String(newIndex).padStart(2, '0')}`;
+      idMap.set(c.id, newId);
+      return {
+        ...c,
+        index: newIndex,
+        id: newId,
+      };
+    });
+
+    if (deletedToReplacementId) {
+      for (const [deletedId, oldTargetId] of deletedToReplacementId.entries()) {
+        const mappedTarget = idMap.get(oldTargetId);
+        if (mappedTarget) {
+          idMap.set(deletedId, mappedTarget);
+        }
+      }
+    }
+
+    setManualOverrides((prev) => {
+      const next: Record<string, string> = {};
+      for (const [coord, oldId] of Object.entries(prev)) {
+        const mapped = idMap.get(oldId);
+        if (mapped) next[coord] = mapped;
+      }
+      return next;
+    });
+
+    setUndoStack((prev) =>
+      prev.map((snap) => {
+        const next: Record<string, string> = {};
+        for (const [coord, oldId] of Object.entries(snap)) {
+          const mapped = idMap.get(oldId);
+          if (mapped) next[coord] = mapped;
+        }
+        return next;
+      })
+    );
+
+    setActiveBrushColorId((prev) => (prev ? idMap.get(prev) ?? newPalette[0]?.id ?? null : null));
+    setHighlightedColorId((prev) =>
+      prev && !deletedToReplacementId?.has(prev) ? idMap.get(prev) ?? null : null
+    );
+    setCustomPalette(newPalette);
+    setSettings((prev) => ({
+      ...prev,
+      paletteSize: newPalette.length,
+      lockPalette: true,
+    }));
+  };
+
+  const handleDeletePaletteColor = (colorId: string) => {
+    const current = finalMosaic.palette;
+    if (current.length <= 2) return;
+    const target = current.find((c) => c.id === colorId);
+    if (!target) return;
+
+    const remaining = current.filter((c) => c.id !== colorId);
+    const targetLab = rgbToLab(target.rgb);
+    let nearest = remaining[0];
+    let bestDist = Infinity;
+    for (const candidate of remaining) {
+      const d = labDistanceSq(targetLab, rgbToLab(candidate.rgb));
+      if (d < bestDist) {
+        bestDist = d;
+        nearest = candidate;
+      }
+    }
+
+    const replacementMap = new Map<string, string>([[colorId, nearest.id]]);
+    applyPaletteCleanup(remaining, replacementMap);
+  };
+
+  const handlePruneUnusedColors = () => {
+    const usedIds = new Set(
+      finalMosaic.stats.filter((s) => s.count > 0).map((s) => s.color.id)
+    );
+    const kept = finalMosaic.palette.filter((c) => usedIds.has(c.id));
+    if (kept.length < 2 || kept.length === finalMosaic.palette.length) return;
+    applyPaletteCleanup(kept);
   };
 
   const handleUpdatePaletteColorHex = (colorId: string, newHex: string) => {
@@ -526,63 +618,18 @@ export default function App() {
           href="#top"
           className="inline-flex items-center gap-2.5 shrink-0 min-w-0"
         >
-          <svg
-            viewBox="0 0 32 32"
-            fill="none"
-            className="w-7 h-7 shrink-0"
+          <img
+            src="./logo-mosaico.svg"
+            alt=""
+            className="w-9 h-9 shrink-0"
             aria-hidden="true"
-          >
-            <rect
-              x="1.5"
-              y="1.5"
-              width="13.5"
-              height="13.5"
-              rx="2"
-              fill="#E15546"
-              stroke="#991B1B"
-              strokeOpacity="0.25"
-              strokeWidth="0.8"
-            />
-            <rect
-              x="17"
-              y="1.5"
-              width="13.5"
-              height="13.5"
-              rx="2"
-              fill="#DDA842"
-              stroke="#854D0E"
-              strokeOpacity="0.25"
-              strokeWidth="0.8"
-            />
-            <rect
-              x="1.5"
-              y="17"
-              width="13.5"
-              height="13.5"
-              rx="2"
-              fill="#2FB3AA"
-              stroke="#115E59"
-              strokeOpacity="0.25"
-              strokeWidth="0.8"
-            />
-            <rect
-              x="17"
-              y="17"
-              width="13.5"
-              height="13.5"
-              rx="2"
-              fill="#244E78"
-              stroke="#0F172A"
-              strokeOpacity="0.28"
-              strokeWidth="0.8"
-            />
-          </svg>
+          />
           <div className="min-w-0">
             <span className="block text-lg font-bold tracking-tight text-slate-900 leading-tight whitespace-nowrap">
               Studio Mosaico Art
             </span>
-            <span className="hidden sm:block text-[11px] font-normal text-slate-500 leading-snug max-w-[340px] xl:max-w-none">
-              Plantillas con coordenadas y mezcla de tonos para murales de madera, mosaicos y pixel art físico
+            <span className="hidden sm:block text-[11px] font-normal text-slate-500 leading-snug">
+              Editor para pixel art
             </span>
           </div>
         </a>
@@ -896,6 +943,7 @@ export default function App() {
                     onUndoEdit={handleUndoEdit}
                     onSelectBrushColor={setActiveBrushColorId}
                     onAddCustomColor={handleAddCustomColor}
+                    onDeletePaletteColor={handleDeletePaletteColor}
                     onToggleHighlight={(id) =>
                       setHighlightedColorId((prev) => (prev === id ? null : id))
                     }
@@ -917,6 +965,8 @@ export default function App() {
                     }
                     onUpdatePaletteColorHex={handleUpdatePaletteColorHex}
                     onSelectBrushColor={(id) => setActiveBrushColorId(id)}
+                    onDeletePaletteColor={handleDeletePaletteColor}
+                    onPruneUnusedColors={handlePruneUnusedColors}
                   />
                 </div>
               </>
@@ -948,6 +998,23 @@ export default function App() {
           </div>
         </div>
       </main>
+
+      <footer className="bg-white border-t border-slate-200 px-4 sm:px-6 lg:px-8 py-4 mt-4">
+        <div className="max-w-[1520px] mx-auto text-center text-xs text-slate-500">
+          <p>
+            &copy; 2026. Desarrollo Web e IA por{' '}
+            <a
+              href="https://github.com/gorck1973"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-semibold text-slate-700 hover:text-slate-900 underline underline-offset-2 transition-colors"
+            >
+              GORCK
+            </a>
+            .
+          </p>
+        </div>
+      </footer>
 
       <WorkshopGuideModal
         isOpen={isWorkshopGuideOpen}

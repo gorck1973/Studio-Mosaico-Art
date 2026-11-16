@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Upload, RotateCcw, Lock, Unlock, RefreshCw } from 'lucide-react';
+import { Upload, RotateCcw, Lock, Unlock, RefreshCw, Sparkles } from 'lucide-react';
 import {
   AdjustmentSettings,
   GRID_PRESETS,
@@ -24,29 +24,39 @@ interface ControlsSidebarProps {
   onRecomputePalette: () => void;
 }
 
-const COLOR_MODES: Array<{ id: PaletteMode; label: string; desc: string }> = [
+const COLOR_MODES: Array<{
+  id: PaletteMode;
+  shortLabel: string;
+  label: string;
+  desc: string;
+}> = [
   {
     id: 'adaptive-kmeans',
+    shortLabel: 'Real',
     label: 'Lectura Inteligente (Color Real)',
     desc: 'Lee los colores originales y los optimiza para el mosaico',
   },
   {
     id: 'replace-black',
+    shortLabel: '1 Col',
     label: 'Reemplazar Negro (Color → Blanco)',
     desc: 'Sustituye el negro por un color puro y sus tonos hacia blanco',
   },
   {
     id: 'mix-2-colors',
+    shortLabel: '2 Col',
     label: 'Degradado 2 Colores (C1 → C2)',
     desc: 'Mezcla progresiva entre color de sombras y color de luces',
   },
   {
     id: 'mix-3-colors',
+    shortLabel: '3 Col',
     label: 'Degradado 3 Colores (C1 → C2 → C3)',
     desc: 'Degradación continua por sombras, medios tonos y luces',
   },
   {
     id: 'pure-colors',
+    shortLabel: 'Puros',
     label: 'Colores Puros (Sin degradar)',
     desc: 'Primarios y secundarios puros + Negro y Blanco',
   },
@@ -652,36 +662,101 @@ export const ControlsSidebar: React.FC<ControlsSidebarProps> = ({
           </div>
         </div>
 
-        {/* Color Mode Selection */}
-        {settings.visionMode === 'color' && (
-          <div className="space-y-2">
-            <div className="grid grid-cols-1 gap-1">
-              {COLOR_MODES.map((m) => {
-                const active = settings.paletteMode === m.id;
+        {/* Compact Visual Color Mode Strip */}
+        {settings.visionMode === 'color' && (() => {
+          const activeMode =
+            COLOR_MODES.find((m) => m.id === settings.paletteMode) ?? COLOR_MODES[0];
+
+          const renderModeIcon = (id: PaletteMode) => {
+            switch (id) {
+              case 'adaptive-kmeans':
+                return <Sparkles className="w-3.5 h-3.5 shrink-0" />;
+              case 'replace-black':
                 return (
-                  <button
-                    key={m.id}
-                    type="button"
-                    onClick={() =>
-                      onUpdateSettings({
-                        paletteMode: m.id,
-                        grayscaleSource: m.id !== 'adaptive-kmeans',
-                      })
-                    }
-                    className={`w-full text-left px-2.5 py-1.5 rounded border transition-colors ${
-                      active
-                        ? 'bg-blue-50 border-blue-600 text-slate-900'
-                        : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
-                    }`}
-                  >
-                    <div className="text-[11px] font-semibold leading-tight">{m.label}</div>
-                    <div className="text-[10px] text-slate-500 leading-tight mt-0.5">
-                      {m.desc}
-                    </div>
-                  </button>
+                  <span
+                    className="w-5 h-3 rounded-xs border border-slate-300/90 shrink-0"
+                    style={{
+                      background: `linear-gradient(135deg, ${settings.color1Hex}, #FFFFFF)`,
+                    }}
+                    aria-hidden="true"
+                  />
                 );
-              })}
-            </div>
+              case 'mix-2-colors':
+                return (
+                  <span
+                    className="w-5 h-3 rounded-xs border border-slate-300/90 shrink-0"
+                    style={{
+                      background: `linear-gradient(135deg, ${settings.color1Hex}, ${settings.color2Hex})`,
+                    }}
+                    aria-hidden="true"
+                  />
+                );
+              case 'mix-3-colors':
+                return (
+                  <span
+                    className="w-5 h-3 rounded-xs border border-slate-300/90 shrink-0"
+                    style={{
+                      background: `linear-gradient(135deg, ${settings.color1Hex}, ${settings.color2Hex}, ${settings.color3Hex})`,
+                    }}
+                    aria-hidden="true"
+                  />
+                );
+              case 'pure-colors':
+              default:
+                return (
+                  <span
+                    className="w-5 h-3 grid grid-cols-2 rounded-xs overflow-hidden border border-slate-300/90 shrink-0"
+                    aria-hidden="true"
+                  >
+                    <span className="bg-[#DC2626]" />
+                    <span className="bg-[#2563EB]" />
+                    <span className="bg-[#EAB308]" />
+                    <span className="bg-[#16A34A]" />
+                  </span>
+                );
+            }
+          };
+
+          return (
+            <div className="space-y-2">
+              <div className="space-y-1.5">
+                <div className="grid grid-cols-5 gap-1">
+                  {COLOR_MODES.map((m) => {
+                    const active = settings.paletteMode === m.id;
+                    return (
+                      <button
+                        key={m.id}
+                        type="button"
+                        onClick={() =>
+                          onUpdateSettings({
+                            paletteMode: m.id,
+                            grayscaleSource: m.id !== 'adaptive-kmeans',
+                          })
+                        }
+                        title={`${m.label} — ${m.desc}`}
+                        aria-label={m.label}
+                        className={`py-1.5 px-1 flex flex-col items-center justify-center gap-1 rounded border transition-colors ${
+                          active
+                            ? 'bg-blue-50 border-blue-600 text-slate-900 ring-1 ring-blue-600/30'
+                            : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                        }`}
+                      >
+                        <span className="h-3.5 flex items-center justify-center">
+                          {renderModeIcon(m.id)}
+                        </span>
+                        <span className="text-[10px] font-semibold leading-none whitespace-nowrap">
+                          {m.shortLabel}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="px-2 py-1 rounded bg-slate-50 border border-slate-200/80 text-[10px] text-slate-600 leading-snug">
+                  <span className="font-semibold text-slate-800">{activeMode.label}:</span>{' '}
+                  {activeMode.desc}
+                </div>
+              </div>
 
             {settings.paletteMode === 'adaptive-kmeans' && (
               <label className="flex items-center justify-between gap-2 px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded cursor-pointer">
@@ -763,7 +838,8 @@ export const ControlsSidebar: React.FC<ControlsSidebarProps> = ({
               </div>
             )}
           </div>
-        )}
+          );
+        })()}
 
         {/* Unified Pixelation Distribution (Same for Black/Gray and Color Mixes) */}
         {usesTonalDistribution && (
